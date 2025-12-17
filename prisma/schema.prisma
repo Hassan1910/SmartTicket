@@ -1,0 +1,124 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ORGANIZER
+  ADMIN
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  code      String   // 6-digit code
+  expires   DateTime
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@index([email])
+}
+
+enum TicketStatus {
+  PENDING
+  PAID
+  USED
+  REFUNDED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String?   // Hashed
+  image         String?   // Added for NextAuth compatibility
+  role          Role      @default(USER)
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  
+  events        Event[]   // Events created by this user
+  tickets       Ticket[]  // Tickets bought by this user
+  verificationTokens VerificationToken[]
+  
+  // Subscription Fields
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  trialEndsAt        DateTime?          @default(dbgenerated("NOW() + interval '14 days'"))
+  subscriptionEndsAt DateTime?
+  subscriptionPlan   SubscriptionPlan?
+
+  // Payment Config
+  paymentConfig      OrganizerPaymentConfig?
+
+  // NextAuth optional models for OAuth (Account, Session) could be added if needed
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+}
+
+enum SubscriptionPlan {
+  MONTHLY
+  YEARLY
+}
+
+enum PaymentGateway {
+  PAYSTACK
+}
+
+model OrganizerPaymentConfig {
+  id          String   @id @default(cuid())
+  organizerId String   @unique
+  organizer   User     @relation(fields: [organizerId], references: [id])
+  gateway     PaymentGateway @default(PAYSTACK)
+  publicKey   String?
+  secretKey   String?  // Encrypted ideally, but plain for this MVP
+  isEnabled   Boolean  @default(false)
+  resendApiKey String?  // Resend API key for sending ticket emails
+  emailDomain String?   // Custom domain for sending emails (e.g., tickets@mydomain.com)
+  updatedAt   DateTime @updatedAt
+}
+
+model Event {
+  id            String    @id @default(cuid())
+  title         String
+  description   String    
+  date          DateTime
+  location      String
+  price         Decimal   @db.Decimal(10, 2)
+  capacity      Int
+  soldCount     Int       @default(0)
+  organizerId   String
+  organizer     User      @relation(fields: [organizerId], references: [id])
+  tickets       Ticket[]
+  image         String?   // For banner
+  createdAt     DateTime  @default(now())
+}
+
+model Ticket {
+  id            String       @id @default(cuid())
+  userId        String?      // Optional for guest purchases
+  eventId       String
+  reference     String       @unique // Paystack transaction reference
+  status        TicketStatus @default(PENDING)
+  qrCodeToken   String?      @unique // Generated after payment
+  guestEmail    String?      // Email for guest purchases
+  guestName     String?      // Name for guest purchases
+  quantity      Int          @default(1)  // Number of tickets in this purchase
+  user          User?        @relation(fields: [userId], references: [id])
+  event         Event        @relation(fields: [eventId], references: [id])
+  purchasedAt   DateTime     @default(now())
+  
+  @@index([eventId, status])
+  @@index([reference])
+  @@index([guestEmail])
+}
